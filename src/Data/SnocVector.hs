@@ -17,6 +17,8 @@ module Data.SnocVector
     , toVector
     , fromVector
     , snoc
+    , Data.SnocVector.null
+    , full
     ) where
 
 import Data.Primitive.MutVar
@@ -43,7 +45,7 @@ data Buffer vm s a = Buffer
 newBuffer :: (VM.MVector vm a, PrimMonad m) => m (Buffer vm (PrimState m) a)
 newBuffer = liftM2 Buffer
     (newMutVar (BuffState 0 0))
-    (VM.new 16)
+    (VM.new 1024)
 
 snocBuffer :: (PrimMonad m, VM.MVector vm a)
            => Int -- ^ current generation
@@ -62,7 +64,7 @@ snocBuffer currGen currUsed value buff@(Buffer s vm) = do
     len = VM.length vm
 
     expand = do
-        vm' <- VM.grow vm $ max 8 len
+        vm' <- VM.grow vm $ max 1024 len
         VM.write vm' currUsed value
         let gen = succ currGen
         s' <- newMutVar $! BuffState gen $! succ currUsed
@@ -86,6 +88,13 @@ data GSnocVector v a = SnocVector
 type SnocVector = GSnocVector Data.Vector.Vector
 type SSnocVector = GSnocVector Data.Vector.Storable.Vector
 type USnocVector = GSnocVector Data.Vector.Unboxed.Vector
+
+null :: GSnocVector v a -> Bool
+null (SnocVector _ _ 0) = True
+null _ = False
+
+full :: V.Vector v a => GSnocVector v a -> Bool
+full (SnocVector (Buffer _ vm) _ used) = VM.length vm == used
 
 instance V.Vector v a => Monoid (GSnocVector v a) where
     mempty = unsafePerformIO $ do
