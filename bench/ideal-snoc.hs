@@ -31,11 +31,11 @@ mkBench name empty finish snoc fold =
 main :: IO ()
 main = defaultMain
     [ mkBench "diff" id ($ []) (\xs x -> xs . (x:)) L.foldl'
+    , mkBench "USnocVector" (mempty :: SV.USnocVector Int) SV.toVector SV.snoc VU.foldl'
     , mkBench "Seq" mempty id (Seq.|>) F.foldl'
     , mkBench "Vector" mempty id V.snoc V.foldl'
     , mkBench "UVector" mempty id VU.snoc VU.foldl'
     , mkBench "SnocVector" (mempty :: SV.SnocVector Int) SV.toVector SV.snoc V.foldl'
-    , mkBench "USnocVector" (mempty :: SV.USnocVector Int) SV.toVector SV.snoc VU.foldl'
     --, mkBench "LUSnocVector" (mempty :: LSV.LUSnocVector Int) LSV.toVectors LSV.snoc
     , mkBench "list" [] id (\xs x -> xs ++ [x]) L.foldl'
     ]

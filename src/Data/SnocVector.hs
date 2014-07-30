@@ -38,29 +38,26 @@ data BuffState = BuffState
     , _bsUsed :: {-# UNPACK #-} !Int
     }
 
-data Buffer vm a = Buffer
-    { _bufferState :: {-# UNPACK #-} !(IORef BuffState) -- generation number, elements used
-    , _bufferVector :: !(vm RealWorld a)
+data GSnocVector v a = GSnocVector
+    { _svState  :: {-# UNPACK #-} !(IORef BuffState)
+    , _svVector :: V.Mutable v RealWorld a
+    , _svGen    :: {-# UNPACK #-} !Int
+    , _svUsed   :: {-# UNPACK #-} !Int
     }
 
-newBuffer :: VM.MVector vm a => IO (Buffer vm a)
-newBuffer = liftM2 Buffer
-    (newIORef (BuffState 0 0))
-    (VM.new 1024)
-
-snocBuffer :: VM.MVector vm a
-           => Int -- ^ current generation
-           -> Int -- ^ used
-           -> a -- ^ value to snoc
-           -> Buffer vm a
-           -> IO (Buffer vm a, Int)
-snocBuffer currGen currUsed value buff@(Buffer s vm) = do
-    join $ atomicModifyIORef' s $ \origBuff@(BuffState buffGen buffUsed) ->
+snoc :: V.Vector v a
+     => GSnocVector v a
+     -> a -- ^ value to snoc
+     -> GSnocVector v a
+snoc (GSnocVector s vm currGen currUsed) value = unsafePerformIO $ join $
+    atomicModifyIORef' s $ \origBuff@(BuffState buffGen buffUsed) ->
         case assert (currUsed <= buffUsed) () of
-            ()
-                | buffUsed >= len -> (origBuff, expand)
-                | currGen == buffGen && currUsed == buffUsed -> (BuffState (succ buffGen) (succ buffUsed), write)
-                | otherwise -> (origBuff, copy)
+          ()
+            | buffUsed >= len -> (origBuff, expand)
+            | currGen == buffGen && currUsed == buffUsed ->
+                let gen = succ buffGen
+                 in (BuffState gen (succ buffUsed), write gen)
+            | otherwise -> (origBuff, copy)
   where
     len = VM.length vm
 
@@ -69,52 +66,48 @@ snocBuffer currGen currUsed value buff@(Buffer s vm) = do
         VM.write vm' currUsed value
         let gen = succ currGen
         s' <- newIORef $! BuffState gen $! succ currUsed
-        return (Buffer s' vm', gen)
+        return $! GSnocVector s' vm' gen (succ currUsed)
 
-    write = do
+    write gen = do
         VM.write vm currUsed value
-        return (buff, succ currGen)
+        return $! GSnocVector s vm gen (succ currUsed)
     copy = do
         vm' <- VM.clone vm
         VM.write vm' currUsed value
-        s' <- newIORef $! BuffState 0 $! succ currUsed
-        return (Buffer s' vm', 0)
-
-data GSnocVector v a = SnocVector
-    { _svBuffer :: {-# UNPACK #-} !(Buffer (V.Mutable v) a)
-    , _svGen    :: {-# UNPACK #-} !Int
-    , _svUsed   :: {-# UNPACK #-} !Int
-    }
+        let used = succ currUsed
+        s' <- newIORef $! BuffState 0 used
+        return $! GSnocVector s' vm' (succ currGen) used
+{-# INLINE snoc #-}
 
 type SnocVector = GSnocVector Data.Vector.Vector
 type SSnocVector = GSnocVector Data.Vector.Storable.Vector
 type USnocVector = GSnocVector Data.Vector.Unboxed.Vector
 
 null :: GSnocVector v a -> Bool
-null (SnocVector _ _ 0) = True
+null (GSnocVector _ _ _ 0) = True
 null _ = False
+{-# INLINE null #-}
 
 full :: V.Vector v a => GSnocVector v a -> Bool
-full (SnocVector (Buffer _ vm) _ used) = VM.length vm == used
+full (GSnocVector _ vm _ used) = VM.length vm == used
+{-# INLINE full #-}
 
 instance V.Vector v a => Monoid (GSnocVector v a) where
     mempty = unsafePerformIO $ do
-        buff <- newBuffer
-        return $! SnocVector buff 0 0
+        bs <- newIORef (BuffState 0 0)
+        vm <- VM.new 1024
+        return $! GSnocVector bs vm 0 0
     mappend sv1 sv2 = V.foldl' snoc sv1 (toVector sv2)
 
-snoc :: V.Vector v a => GSnocVector v a -> a -> GSnocVector v a
-snoc (SnocVector buffer gen used) value = unsafePerformIO $ do
-    (buffer', gen') <- snocBuffer gen used value buffer
-    return $! SnocVector buffer' gen' (succ used)
-
 toVector :: V.Vector v a => GSnocVector v a -> v a
-toVector (SnocVector (Buffer _ mv) _ used) = unsafePerformIO $ do
+toVector (GSnocVector _ mv _ used) = unsafePerformIO $ do
     v <- V.unsafeFreeze mv
     return $! V.unsafeTake used v
+{-# INLINE toVector #-}
 
 fromVector :: V.Vector v a => v a -> GSnocVector v a
 fromVector v = unsafePerformIO $ do
     mv <- V.unsafeThaw v
     s <- newIORef $! BuffState 0 $! VM.length mv
-    return (SnocVector (Buffer s mv) 0 (V.length v))
+    return $! GSnocVector s mv 0 (V.length v)
+{-# INLINE fromVector #-}
