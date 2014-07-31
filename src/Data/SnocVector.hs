@@ -72,7 +72,11 @@ snoc (GSnocVector counter vm currGen currUsed) value = inlinePerformIO $
         -- Shouldn't be necessary in theory, but without it (and
         -- inlinePerformIO + inlining snoc), the write does not take place
         -- reliably.
-        !_ <- VM.unsafeRead vm currUsed
+        --
+        -- More information at:
+        --
+        -- http://www.haskell.org/pipermail/haskell-cafe/2014-July/115335.html
+        _ <- VM.unsafeRead vm currUsed
 
         return $! GSnocVector counter vm gen (succ currUsed)
     copy = do
