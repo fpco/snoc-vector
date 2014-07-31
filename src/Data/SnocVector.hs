@@ -25,7 +25,7 @@ import qualified Data.Vector.Generic as V
 import qualified Data.Vector.Generic.Mutable as VM
 import Control.Monad.Primitive
 import Data.ByteString.Internal (inlinePerformIO)
-import System.IO.Unsafe (unsafeDupablePerformIO)
+import System.IO.Unsafe (unsafeDupablePerformIO, unsafePerformIO)
 import qualified Data.Vector
 import qualified Data.Vector.Storable
 import qualified Data.Vector.Unboxed
@@ -58,7 +58,9 @@ snoc (GSnocVector counter vm currGen currUsed) value = inlinePerformIO $
   where
     len = VM.length vm
 
-    expand = do
+    -- This technique is used to ensure that no memory allocation is performed
+    -- inside of inlinePerformIO.
+    expand = return $ unsafePerformIO $ do
         vm' <- VM.grow vm $ max 1024 len
         VM.unsafeWrite vm' currUsed value
         let gen = succ currGen
@@ -79,7 +81,7 @@ snoc (GSnocVector counter vm currGen currUsed) value = inlinePerformIO $
         _ <- VM.unsafeRead vm currUsed
 
         return $! GSnocVector counter vm gen (succ currUsed)
-    copy = do
+    copy = return $ unsafePerformIO $ do
         vm' <- VM.clone vm
         VM.unsafeWrite vm' currUsed value
         let used = succ currUsed
