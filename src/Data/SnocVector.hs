@@ -73,7 +73,7 @@ snoc (GSnocVector counter vm currGen currUsed) value = inlinePerformIO $
         VM.unsafeWrite vm' currUsed value
         let used = succ currUsed
         s' <- newCounter 0
-        return (GSnocVector s' vm' (succ currGen) used)
+        return $! GSnocVector s' vm' (succ currGen) used
 {-# INLINE snoc #-}
 
 type SnocVector = GSnocVector Data.Vector.Vector
