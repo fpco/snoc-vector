@@ -21,20 +21,18 @@ module Data.SnocVector
     , full
     ) where
 
-import Data.IORef
 import qualified Data.Vector.Generic as V
 import qualified Data.Vector.Generic.Mutable as VM
-import Control.Monad (liftM2, join)
 import Control.Monad.Primitive
-import Control.Exception
 import Data.ByteString.Internal (inlinePerformIO)
 import qualified Data.Vector
 import qualified Data.Vector.Storable
 import qualified Data.Vector.Unboxed
 import Data.Monoid (Monoid (..))
+import Data.Atomics.Counter.Unboxed
 
 data GSnocVector v a = GSnocVector
-    { _svGenMut :: {-# UNPACK #-} !(IORef Int)
+    { _svGenMut :: {-# UNPACK #-} !AtomicCounter
     , _svVector :: V.Mutable v RealWorld a
     , _svGen    :: {-# UNPACK #-} !Int
     , _svUsed   :: {-# UNPACK #-} !Int
@@ -44,15 +42,18 @@ snoc :: V.Vector v a
      => GSnocVector v a
      -> a -- ^ value to snoc
      -> GSnocVector v a
-snoc (GSnocVector s vm currGen currUsed) value = inlinePerformIO $ join $
-    atomicModifyIORef s $ \buffGen ->
-        case () of
-          ()
-            | currUsed >= len -> (buffGen, expand)
-            | currGen == buffGen ->
-                let gen = succ buffGen
-                 in (gen, write gen)
-            | otherwise -> (buffGen, copy)
+snoc (GSnocVector counter vm currGen currUsed) value = inlinePerformIO $
+    if currUsed >= len
+        then expand
+        else do
+            ticket <- readCounterForCAS counter
+            if currGen == peekCTicket ticket
+                then do
+                    (success, ticket') <- casCounter counter ticket 1
+                    if success
+                        then write (peekCTicket ticket')
+                        else copy
+                else copy
   where
     len = VM.length vm
 
@@ -61,17 +62,17 @@ snoc (GSnocVector s vm currGen currUsed) value = inlinePerformIO $ join $
         VM.unsafeWrite vm' currUsed value
         let gen = succ currGen
             used = succ currUsed
-        s' <- newIORef gen
+        s' <- newCounter gen
         return $! GSnocVector s' vm' gen used
 
     write gen = do
         VM.unsafeWrite vm currUsed value
-        return $! GSnocVector s vm gen (succ currUsed)
+        return $! GSnocVector counter vm gen (succ currUsed)
     copy = do
         vm' <- VM.clone vm
         VM.unsafeWrite vm' currUsed value
         let used = succ currUsed
-        s' <- newIORef 0
+        s' <- newCounter 0
         return (GSnocVector s' vm' (succ currGen) used)
 {-# INLINE snoc #-}
 
@@ -90,9 +91,9 @@ full (GSnocVector _ vm _ used) = VM.length vm == used
 
 instance V.Vector v a => Monoid (GSnocVector v a) where
     mempty = inlinePerformIO $ do
-        bs <- newIORef 0
+        counter <- newCounter 0
         vm <- VM.new 1024
-        return $! GSnocVector bs vm 0 0
+        return $! GSnocVector counter vm 0 0
     {-# INLINE mempty #-}
     mappend sv1 sv2 = V.foldl' snoc sv1 (toVector sv2)
     {-# INLINE mappend #-}
@@ -106,6 +107,6 @@ toVector (GSnocVector _ mv _ used) = inlinePerformIO $ do
 fromVector :: V.Vector v a => v a -> GSnocVector v a
 fromVector v = inlinePerformIO $ do
     mv <- V.unsafeThaw v
-    s <- newIORef 0
+    s <- newCounter 0
     return $! GSnocVector s mv 0 (V.length v)
 {-# INLINE fromVector #-}
