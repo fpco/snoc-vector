@@ -2,7 +2,6 @@
 -- never reusing an old buffer.
 import Criterion.Main
 import qualified Data.SnocVector as SV
-import qualified Data.SnocVector.Lazy as LSV
 import Data.Monoid (mempty)
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
@@ -30,7 +29,6 @@ main = defaultMain
     [ mkBench "diff" id ($ []) (\xs x -> xs . (x:))
     , mkBench "USnocVector" (mempty :: SV.USnocVector Int) SV.toVector SV.snoc
     , mkBench "SnocVector" (mempty :: SV.SnocVector Int) SV.toVector SV.snoc
-    , mkBench "LUSnocVector" (mempty :: LSV.LUSnocVector Int) LSV.toVectors LSV.snoc
     , mkBench "Seq" mempty id (Seq.|>)
     , mkBench "Vector" mempty id V.snoc
     , mkBench "UVector" mempty id VU.snoc
