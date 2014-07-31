@@ -25,6 +25,7 @@ import qualified Data.Vector.Generic as V
 import qualified Data.Vector.Generic.Mutable as VM
 import Control.Monad.Primitive
 import Data.ByteString.Internal (inlinePerformIO)
+import System.IO.Unsafe (unsafeDupablePerformIO)
 import qualified Data.Vector
 import qualified Data.Vector.Storable
 import qualified Data.Vector.Unboxed
@@ -96,7 +97,7 @@ full (GSnocVector _ vm _ used) = VM.length vm == used
 {-# INLINE full #-}
 
 instance V.Vector v a => Monoid (GSnocVector v a) where
-    mempty = inlinePerformIO $ do
+    mempty = unsafeDupablePerformIO $ do
         counter <- newCounter 0
         vm <- VM.new 1024
         return $! GSnocVector counter vm 0 0
@@ -105,14 +106,14 @@ instance V.Vector v a => Monoid (GSnocVector v a) where
     {-# INLINE mappend #-}
 
 toVector :: V.Vector v a => GSnocVector v a -> v a
-toVector (GSnocVector _ mv _ used) = inlinePerformIO $ do
+toVector (GSnocVector _ mv _ used) = unsafeDupablePerformIO $ do
     v <- V.unsafeFreeze mv
     return $! V.unsafeTake used v
 {-# INLINE toVector #-}
 
 fromVector :: V.Vector v a => v a -> GSnocVector v a
-fromVector v = inlinePerformIO $ do
+fromVector v = unsafeDupablePerformIO $ do
     mv <- V.unsafeThaw v
     s <- newCounter 0
-    return $! GSnocVector s mv 0 (V.length v)
+    return $! GSnocVector s (VM.unsafeTake (V.length v) mv) 0 (V.length v)
 {-# INLINE fromVector #-}
