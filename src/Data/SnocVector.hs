@@ -33,13 +33,8 @@ import qualified Data.Vector.Storable
 import qualified Data.Vector.Unboxed
 import Data.Monoid (Monoid (..))
 
-data BuffState = BuffState
-    { _bsGen :: {-# UNPACK #-} !Int
-    , _bsUsed :: {-# UNPACK #-} !Int
-    }
-
 data GSnocVector v a = GSnocVector
-    { _svState  :: {-# UNPACK #-} !(IORef BuffState)
+    { _svGenMut :: {-# UNPACK #-} !(IORef Int)
     , _svVector :: V.Mutable v RealWorld a
     , _svGen    :: {-# UNPACK #-} !Int
     , _svUsed   :: {-# UNPACK #-} !Int
@@ -50,14 +45,14 @@ snoc :: V.Vector v a
      -> a -- ^ value to snoc
      -> GSnocVector v a
 snoc (GSnocVector s vm currGen currUsed) value = inlinePerformIO $ join $
-    atomicModifyIORef s $ \origBuff@(BuffState buffGen buffUsed) ->
-        case assert (currUsed <= buffUsed) () of
+    atomicModifyIORef s $ \buffGen ->
+        case () of
           ()
-            | buffUsed >= len -> (origBuff, expand)
-            | currGen == buffGen && currUsed == buffUsed ->
+            | currUsed >= len -> (buffGen, expand)
+            | currGen == buffGen ->
                 let gen = succ buffGen
-                 in (BuffState gen (succ buffUsed), write gen)
-            | otherwise -> (origBuff, copy)
+                 in (gen, write gen)
+            | otherwise -> (buffGen, copy)
   where
     len = VM.length vm
 
@@ -66,7 +61,7 @@ snoc (GSnocVector s vm currGen currUsed) value = inlinePerformIO $ join $
         VM.unsafeWrite vm' currUsed value
         let gen = succ currGen
             used = succ currUsed
-        s' <- newIORef $ BuffState gen used
+        s' <- newIORef gen
         return $! GSnocVector s' vm' gen used
 
     write gen = do
@@ -76,7 +71,7 @@ snoc (GSnocVector s vm currGen currUsed) value = inlinePerformIO $ join $
         vm' <- VM.clone vm
         VM.unsafeWrite vm' currUsed value
         let used = succ currUsed
-        s' <- newIORef $ BuffState 0 used
+        s' <- newIORef 0
         return (GSnocVector s' vm' (succ currGen) used)
 {-# INLINE snoc #-}
 
@@ -95,7 +90,7 @@ full (GSnocVector _ vm _ used) = VM.length vm == used
 
 instance V.Vector v a => Monoid (GSnocVector v a) where
     mempty = inlinePerformIO $ do
-        bs <- newIORef (BuffState 0 0)
+        bs <- newIORef 0
         vm <- VM.new 1024
         return $! GSnocVector bs vm 0 0
     {-# INLINE mempty #-}
@@ -111,6 +106,6 @@ toVector (GSnocVector _ mv _ used) = inlinePerformIO $ do
 fromVector :: V.Vector v a => v a -> GSnocVector v a
 fromVector v = inlinePerformIO $ do
     mv <- V.unsafeThaw v
-    s <- newIORef $ BuffState 0 (VM.length mv)
+    s <- newIORef 0
     return $! GSnocVector s mv 0 (V.length v)
 {-# INLINE fromVector #-}
