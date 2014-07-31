@@ -67,6 +67,12 @@ snoc (GSnocVector counter vm currGen currUsed) value = inlinePerformIO $
 
     write gen = do
         VM.unsafeWrite vm currUsed value
+
+        -- Shouldn't be necessary in theory, but without it (and
+        -- inlinePerformIO + inlining snoc), the write does not take place
+        -- reliably.
+        !_ <- VM.unsafeRead vm currUsed
+
         return $! GSnocVector counter vm gen (succ currUsed)
     copy = do
         vm' <- VM.clone vm

@@ -39,3 +39,9 @@ main = hspec $ do
             v = mappend v1 v2
             sv = mappend sv1 sv2
          in toVector sv == v
+    it "uninitialized" $ do
+        let x = mempty
+        toVector x `shouldBe` (mempty :: Data.Vector.Vector Int)
+        let y = x `snoc` 0
+        Data.Vector.length (toVector y) `shouldBe` 1
+        toVector y `shouldBe` Data.Vector.fromList [0]
