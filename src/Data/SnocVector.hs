@@ -35,7 +35,7 @@ import Data.Atomics.Counter.Unboxed
 data GSnocVector v a = GSnocVector
     { _svGenMut :: {-# UNPACK #-} !AtomicCounter
     , _svVector :: V.Mutable v RealWorld a
-    , _svGen    :: {-# UNPACK #-} !Int
+    , _svGen    :: {-# UNPACK #-} !CTicket
     , _svUsed   :: {-# UNPACK #-} !Int
     }
 
@@ -47,13 +47,9 @@ snoc (GSnocVector counter vm currGen currUsed) value = inlinePerformIO $
     if currUsed >= len
         then expand
         else do
-            ticket <- readCounterForCAS counter
-            if currGen == peekCTicket ticket
-                then do
-                    (success, ticket') <- casCounter counter ticket 1
-                    if success
-                        then write (peekCTicket ticket')
-                        else copy
+            (success, currGen') <- casCounter counter currGen 1
+            if success
+                then write (peekCTicket currGen')
                 else copy
   where
     len = VM.length vm
