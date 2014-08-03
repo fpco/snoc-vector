@@ -54,7 +54,7 @@ snoc (GSnocVector counter vm currGen currUsed s#) value =
     IO f = if currUsed >= len
         then expand
         else do
-            (success, currGen') <- casCounter counter currGen 1
+            (success, currGen') <- casCounter counter currGen (succ (peekCTicket currGen))
             if success
                 then write (peekCTicket currGen')
                 else copy
